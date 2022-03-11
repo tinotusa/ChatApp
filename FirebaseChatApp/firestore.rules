@@ -1,0 +1,101 @@
+rules_version = '2';
+
+service cloud.firestore {
+	function isLoggedIn() {
+		return request.auth != null;
+	}
+  
+  function isUser() {
+  	return request.auth.uid == resource.data.id;
+  }
+  
+  function isValidUser() {
+  	return (
+    	request.resource.data.firstName is string && 
+    	request.resource.data.lastName is string && 
+    	request.resource.data.birthday is timestamp && 
+    	request.resource.data.email is string && 
+      request.resource.data.photoURL is string 
+    );
+  }
+  
+  function isValidRoom() {
+  	return (
+    	request.resource.data.name is string &&
+      request.resource.data.hasPassword is bool &&
+      request.resource.data.isPrivate is bool &&
+      request.resource.data.passwordHash is string &&
+      request.resource.data.roomImageURL is string
+    );
+  }
+  
+  function isRoomCreator() {
+  	return request.auth.uid == resource.data.createdBy;
+  }
+  
+  function isValidMessage() {
+  	return (
+    	request.resource.data.dateSent is timestamp &&
+      request.resource.data.id is string &&
+      request.resource.data.message is string &&
+      request.resource.data.senderDetails is map
+    )
+  }
+  
+  function isMessageCreator() {
+  	return request.auth.uid == resource.data.senderDetails.senderID;
+  }
+  
+  function roomIsPublic() {
+  	return !resource.data.isPrivate;
+  }
+  
+  function userExists(database, userID) {
+  	return exists(/databases/$(database)/documents/users/$(userID))
+  }
+  
+  function roomExists(database, roomID) {
+  	return exists(/databases/$(database)/documents/rooms/$(roomID))
+  }
+  
+  function messageExists(database, roomID, messageID) {
+  	return exists(/databases/$(database)/documents/rooms/$(roomID)/messages/$(messageID))
+  }
+  
+  function isRoomOwner(database, roomID) {
+  	return get(/databases/$(database)/documents/rooms/$(roomID)).data.createdBy == request.auth.uid
+  }
+  
+  // RULES
+	match /databases/{database}/documents {
+    match /users/{userID} {
+    	allow read: if isLoggedIn() && userExists(database, userID);
+  		allow create: if isValidUser();
+      allow update, delete: if isLoggedIn() && isUser() && userExists(database, userID);
+    }
+    
+    match /rooms/{roomID} {
+    	allow get: if isLoggedIn() && 
+      	(roomIsPublic() || isRoomCreator()) &&
+        roomExists(database, roomID);
+      
+      allow list: if isLoggedIn() && request.query.limit <= 20;
+
+      allow create: if isLoggedIn() && isValidRoom();
+      
+      allow delete, update: if isLoggedIn() &&
+      	isRoomCreator() &&
+        roomExists(database, roomID);
+      
+      match /messages/{messageID} {
+        allow read: if isLoggedIn()// && messageExists(database, roomID, messageID);
+        allow list: if isLoggedIn() && request.query.limit <= 50;
+      	allow create: if isLoggedIn() && isValidMessage();
+        allow delete: if isLoggedIn() && isRoomOwner(database, roomID);
+        allow delete: if isLoggedIn() && 
+        	isMessageCreator() && 
+          (messageExists(database, roomID, messageID) || isRoomOwner(database, roomID));
+      }
+    }
+  }
+}
